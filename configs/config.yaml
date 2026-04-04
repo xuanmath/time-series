@@ -1,0 +1,55 @@
+# Time Series Analysis Configuration
+
+# Data settings
+data:
+  filepath: "data/raw/data.csv"
+  time_col: "date"
+  value_col: "value"
+  test_size: 0.2
+
+# Feature engineering
+features:
+  lags: [1, 7, 14, 28]
+  rolling_windows: [7, 14, 28]
+  rolling_stats: ["mean", "std", "min", "max"]
+
+# Model settings
+model:
+  name: "lstm"  # Options: arima, prophet, lstm, xgboost
+  
+  # ARIMA parameters
+  arima:
+    order: [1, 1, 1]
+    seasonal_order: [0, 0, 0, 0]
+  
+  # Prophet parameters
+  prophet:
+    growth: "linear"
+    seasonality_mode: "additive"
+    yearly_seasonality: true
+    weekly_seasonality: true
+    daily_seasonality: false
+  
+  # LSTM parameters
+  lstm:
+    seq_len: 24
+    pred_len: 1
+    hidden_size: 64
+    num_layers: 2
+    dropout: 0.1
+    learning_rate: 0.001
+    epochs: 100
+    batch_size: 32
+
+# Training settings
+training:
+  validation_split: 0.1
+  early_stopping_patience: 10
+  random_seed: 42
+
+# Output settings
+output:
+  model_path: "models/checkpoints"
+  results_path: "data/results"
+  save_predictions: true
+  save_metrics: true
