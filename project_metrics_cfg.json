@@ -1,0 +1,9 @@
+{
+  "global_score_range": [0, 1],
+  "optim_direction": "composite_max",
+  "metrics_weights": {
+    "mse_loss": { "weight": 0.5, "mode": "minimize", "soft_cap": 0.1 },
+    "mae_loss": { "weight": 0.3, "mode": "minimize", "soft_cap": 0.05 },
+    "r2_score": { "weight": 0.2, "mode": "maximize", "soft_floor": 0.85 }
+  }
+}

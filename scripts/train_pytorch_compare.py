@@ -4,7 +4,13 @@ Simple PyTorch Model Training - LSTM, GRU, Transformer
 
 import sys
 from pathlib import Path
-sys.path.insert(0, str(Path(__file__).parent.parent))
+
+# Set working directory to project root
+project_root = Path(__file__).parent.parent
+import os
+os.chdir(project_root)
+
+sys.path.insert(0, str(project_root))
 
 import numpy as np
 import pandas as pd

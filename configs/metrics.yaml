@@ -1,0 +1,96 @@
+# Metrics Configuration for Auto Optimization
+
+# Primary metric (used for model selection)
+primary_metric: "r2"
+optimization_direction: "maximize"  # maximize or minimize
+
+# Target thresholds
+targets:
+  r2: 0.99
+  rmse: 0.02
+  mae: 0.015
+  smape: 10.0
+
+# Metric weights for composite score
+weights:
+  r2: 0.5
+  rmse: 0.25
+  mae: 0.15
+  smape: 0.10
+
+# Acceptance criteria
+acceptance:
+  min_r2: 0.95
+  max_rmse: 0.10
+  max_mae: 0.05
+
+# Models to optimize
+models:
+  - name: "gradient_boosting"
+    enabled: true
+    priority: 1
+  - name: "random_forest"
+    enabled: true
+    priority: 2
+  - name: "lstm"
+    enabled: true
+    priority: 3
+  - name: "gru"
+    enabled: true
+    priority: 4
+  - name: "transformer"
+    enabled: true
+    priority: 5
+
+# Hyperparameter search spaces
+hyperparameters:
+  gradient_boosting:
+    n_estimators: [50, 100, 200]
+    max_depth: [4, 6, 8, 10]
+    learning_rate: [0.01, 0.05, 0.1, 0.2]
+    subsample: [0.7, 0.8, 0.9, 1.0]
+  
+  random_forest:
+    n_estimators: [50, 100, 200]
+    max_depth: [8, 10, 12, 15]
+    min_samples_split: [2, 5, 10]
+  
+  lstm:
+    hidden_size: [32, 64, 128]
+    num_layers: [1, 2, 3]
+    dropout: [0.1, 0.2, 0.3]
+    learning_rate: [0.001, 0.0005, 0.0001]
+  
+  gru:
+    hidden_size: [32, 64, 128]
+    num_layers: [1, 2, 3]
+    dropout: [0.1, 0.2, 0.3]
+    learning_rate: [0.001, 0.0005, 0.0001]
+  
+  transformer:
+    d_model: [32, 64, 128]
+    nhead: [2, 4, 8]
+    num_layers: [1, 2, 3]
+    dropout: [0.1, 0.2, 0.3]
+    learning_rate: [0.0001, 0.00005]
+
+# Feature engineering options
+feature_engineering:
+  seq_len_options: [12, 24, 48, 72]
+  add_time_features: [true, false]
+  add_wind_features: [true, false]
+  use_all_features: [true, false]
+
+# Optimization settings
+optimization:
+  max_iterations: 100
+  early_stopping_patience: 10
+  n_random_search: 20  # Number of random configs to try
+  cross_validation_folds: 3
+  
+# Git automation
+git:
+  auto_commit: true
+  auto_push: true
+  commit_improvements_only: true  # Only commit if metrics improve
+  branch: "main"
