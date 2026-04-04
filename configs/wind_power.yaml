@@ -1,0 +1,48 @@
+# Wind Power Forecasting Configuration
+
+# Data settings
+data:
+  filepath: "data/raw/wind_power.csv"
+  test_size: 0.2
+
+# Feature settings
+features:
+  add_time_features: true
+  add_wind_features: true
+
+# Model settings
+model:
+  name: "transformer"  # Options: lstm, transformer
+  
+  # LSTM parameters
+  lstm:
+    seq_len: 24
+    hidden_size: 128
+    num_layers: 2
+    dropout: 0.2
+    learning_rate: 0.001
+    epochs: 100
+    batch_size: 64
+  
+  # Transformer parameters
+  transformer:
+    seq_len: 24
+    d_model: 64
+    nhead: 4
+    num_encoder_layers: 2
+    num_decoder_layers: 2
+    dim_feedforward: 256
+    dropout: 0.1
+    learning_rate: 0.0001
+    epochs: 100
+    batch_size: 64
+
+# Training settings
+training:
+  early_stopping_patience: 15
+  random_seed: 42
+
+# Output settings
+output:
+  model_path: "models/checkpoints"
+  results_path: "data/results"
