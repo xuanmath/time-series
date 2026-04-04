@@ -1,5 +1,6 @@
 """
 Wind Power Forecasting Training Script
+Enhanced with logging
 """
 
 import argparse
@@ -17,7 +18,8 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from src.models.lstm import LSTMModel
 from src.models.transformer import TransformerForecaster
 from src.utils.preprocessing import WindPowerDataProcessor
-from src.utils.metrics import evaluate_predictions, print_metrics
+from src.utils.metrics import evaluate_predictions
+from src.utils.logging_utils import setup_experiment
 
 
 def load_config(config_path: str) -> dict:
@@ -32,17 +34,15 @@ def train_model(
     X_test: np.ndarray,
     y_test: np.ndarray,
     processor: WindPowerDataProcessor,
-    config: dict
+    config: dict,
+    logger
 ):
     """Train model and return predictions."""
     model_name = config["model"]["name"]
     model_config = config["model"].get(model_name, {})
     
     if model_name == "lstm":
-        # Create sequences for LSTM
         seq_len = model_config.get("seq_len", 24)
-        X_train_seq, y_train_seq = processor.create_sequences(X_train, y_train, seq_len)
-        X_test_seq, y_test_seq = processor.create_sequences(X_test, y_test, seq_len)
         
         model = LSTMModel(
             seq_len=seq_len,
@@ -55,7 +55,11 @@ def train_model(
             batch_size=model_config.get("batch_size", 32)
         )
         
-        model.fit(y_train, verbose=1, early_stopping_patience=10)
+        logger.log_training_start("LSTM")
+        
+        # Convert to pandas Series for LSTM model
+        y_train_series = pd.Series(y_train)
+        model.fit(y_train_series, verbose=0, early_stopping_patience=10)
         
         # Predict
         last_values = y_train[-seq_len:]
@@ -65,6 +69,8 @@ def train_model(
         seq_len = model_config.get("seq_len", 24)
         X_train_seq, y_train_seq = processor.create_sequences(X_train, y_train, seq_len)
         X_test_seq, y_test_seq = processor.create_sequences(X_test, y_test, seq_len)
+        
+        logger.info(f"    Sequence shape: {X_train_seq.shape}")
         
         model = TransformerForecaster(
             seq_len=seq_len,
@@ -80,7 +86,13 @@ def train_model(
             batch_size=model_config.get("batch_size", 32)
         )
         
-        model.fit(X_train_seq, y_train_seq, verbose=1)
+        logger.log_training_start("Transformer")
+        
+        train_start = datetime.now()
+        model.fit(X_train_seq, y_train_seq, verbose=0, early_stopping_patience=15)
+        train_duration = (datetime.now() - train_start).total_seconds()
+        logger.info(f"    Training time: {train_duration:.2f} seconds")
+        
         predictions = model.predict(X_test_seq).flatten()
         y_test = y_test_seq.flatten()
         
@@ -95,6 +107,8 @@ def main():
     parser.add_argument("--config", type=str, default="configs/wind_power.yaml", help="Config file path")
     parser.add_argument("--model", type=str, choices=["lstm", "transformer"], help="Override model type")
     parser.add_argument("--seq-len", type=int, help="Override sequence length")
+    parser.add_argument("--epochs", type=int, help="Override epochs")
+    parser.add_argument("--batch-size", type=int, help="Override batch size")
     args = parser.parse_args()
     
     # Load config
@@ -104,13 +118,19 @@ def main():
         config["model"]["name"] = args.model
     if args.seq_len:
         config["model"][config["model"]["name"]]["seq_len"] = args.seq_len
+    if args.epochs:
+        config["model"][config["model"]["name"]]["epochs"] = args.epochs
+    if args.batch_size:
+        config["model"][config["model"]["name"]]["batch_size"] = args.batch_size
     
-    print("=" * 60)
-    print(f"Wind Power Forecasting - {config['model']['name'].upper()}")
-    print("=" * 60)
+    model_name = config["model"]["name"]
+    model_config = config["model"].get(model_name, {})
+    
+    # Setup logging
+    logger = setup_experiment(model_name, model_config, log_dir="logs")
     
     # Load data
-    print("\n[1/4] Loading data...")
+    logger.info("\n[1/4] Loading data...")
     processor = WindPowerDataProcessor(
         target_col="Power",
         time_col="Time",
@@ -118,33 +138,43 @@ def main():
     )
     
     df = processor.load_data(config["data"]["filepath"])
-    print(f"    Data shape: {df.shape}")
-    print(f"    Time range: {df['Time'].min()} ~ {df['Time'].max()}")
+    time_range = f"{df['Time'].min()} ~ {df['Time'].max()}"
+    logger.info(f"    Data shape: {df.shape}")
+    logger.info(f"    Time range: {time_range}")
     
     # Preprocess
-    print("\n[2/4] Preprocessing...")
+    logger.info("\n[2/4] Preprocessing...")
     X, y = processor.fit_transform(df, add_time_features=True, add_wind_features=True)
-    print(f"    Features: {X.shape[1]}")
-    print(f"    Samples: {len(X)}")
+    logger.info(f"    Features: {X.shape[1]}")
+    logger.info(f"    Samples: {len(X)}")
     
     # Split
     X_train, X_test, y_train, y_test = processor.train_test_split(
         X, y, test_size=config["data"]["test_size"], shuffle=False
     )
-    print(f"    Train: {len(X_train)}, Test: {len(X_test)}")
+    
+    logger.log_data_info(
+        n_samples=len(X),
+        n_features=X.shape[1],
+        n_train=len(X_train),
+        n_test=len(X_test),
+        time_range=time_range
+    )
     
     # Train
-    print("\n[3/4] Training model...")
-    model, predictions, y_test_actual = train_model(X_train, y_train, X_test, y_test, processor, config)
+    logger.info("\n[3/4] Training model...")
+    model, predictions, y_test_actual = train_model(
+        X_train, y_train, X_test, y_test, processor, config, logger
+    )
     
     # Inverse transform predictions
     predictions_original = processor.inverse_transform_target(predictions)
     y_test_original = processor.inverse_transform_target(y_test_actual)
     
     # Evaluate
-    print("\n[4/4] Evaluating...")
+    logger.info("\n[4/4] Evaluating...")
     metrics = evaluate_predictions(y_test_original, predictions_original)
-    print_metrics(metrics, title="Test Results")
+    logger.log_results(metrics)
     
     # Save results
     output_path = Path(config["output"]["results_path"])
@@ -153,28 +183,30 @@ def main():
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     
     # Save predictions
+    pred_file = output_path / f"predictions_{model_name}_{timestamp}.csv"
     pred_df = pd.DataFrame({
         "actual": y_test_original,
         "predicted": predictions_original,
         "error": y_test_original - predictions_original
     })
-    pred_df.to_csv(output_path / f"predictions_{timestamp}.csv", index=False)
-    print(f"\nPredictions saved to {output_path / f'predictions_{timestamp}.csv'}")
-    
-    # Save metrics
-    with open(output_path / f"metrics_{timestamp}.json", "w") as f:
-        json.dump(metrics, f, indent=2)
+    pred_df.to_csv(pred_file, index=False)
+    logger.log_file_saved("Predictions", str(pred_file))
     
     # Save model
     model_path = Path(config["output"]["model_path"])
     model_path.mkdir(parents=True, exist_ok=True)
-    model.save(model_path / f"{config['model']['name']}_model.pkl")
-    processor.save(model_path / "processor.pkl")
-    print(f"Model saved to {model_path}")
+    model_file = model_path / f"{model_name}_model.pkl"
+    processor_file = model_path / "processor.pkl"
+    model.save(str(model_file))
+    processor.save(str(processor_file))
+    logger.log_file_saved("Model", str(model_file))
     
-    print("\n" + "=" * 60)
-    print("Training completed!")
-    print("=" * 60)
+    # Finalize logging
+    final_metrics = logger.finalize()
+    
+    logger.log_separator()
+    logger.info("✅ Training completed!")
+    logger.log_separator()
 
 
 if __name__ == "__main__":

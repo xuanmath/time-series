@@ -1,5 +1,6 @@
 """
 Wind Power Forecasting with sklearn (No extra dependencies)
+Enhanced with logging
 """
 
 import argparse
@@ -15,7 +16,8 @@ from datetime import datetime
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from src.utils.preprocessing import WindPowerDataProcessor
-from src.utils.metrics import evaluate_predictions, print_metrics
+from src.utils.metrics import evaluate_predictions
+from src.utils.logging_utils import setup_experiment
 
 from sklearn.ensemble import GradientBoostingRegressor, RandomForestRegressor
 from sklearn.linear_model import Ridge
@@ -64,14 +66,24 @@ def main():
     parser.add_argument("--model", type=str, choices=["gradient_boosting", "random_forest", "ridge"], default="gradient_boosting", help="Model type")
     parser.add_argument("--seq-len", type=int, default=24, help="Sequence length for lagged features")
     parser.add_argument("--n-estimators", type=int, default=100, help="Number of estimators")
+    parser.add_argument("--max-depth", type=int, default=6, help="Max depth for trees")
+    parser.add_argument("--learning-rate", type=float, default=0.1, help="Learning rate")
     args = parser.parse_args()
     
-    print("=" * 60)
-    print(f"Wind Power Forecasting - {args.model.upper()}")
-    print("=" * 60)
+    # Model config for logging
+    model_config = {
+        "model_type": args.model,
+        "seq_len": args.seq_len,
+        "n_estimators": args.n_estimators,
+        "max_depth": args.max_depth,
+        "learning_rate": args.learning_rate
+    }
+    
+    # Setup logging
+    logger = setup_experiment(args.model, model_config, log_dir="logs")
     
     # Load data
-    print("\n[1/4] Loading data...")
+    logger.info("\n[1/4] Loading data...")
     processor = WindPowerDataProcessor(
         target_col="Power",
         time_col="Time",
@@ -79,53 +91,69 @@ def main():
     )
     
     df = processor.load_data("data/raw/wind_power.csv")
-    print(f"    Data shape: {df.shape}")
-    print(f"    Time range: {df['Time'].min()} ~ {df['Time'].max()}")
+    time_range = f"{df['Time'].min()} ~ {df['Time'].max()}"
+    logger.info(f"    Data shape: {df.shape}")
+    logger.info(f"    Time range: {time_range}")
     
     # Preprocess
-    print("\n[2/4] Preprocessing...")
+    logger.info("\n[2/4] Preprocessing...")
     X, y = processor.fit_transform(df, add_time_features=True, add_wind_features=True)
-    print(f"    Features: {X.shape[1]}")
-    print(f"    Samples: {len(X)}")
+    logger.info(f"    Original features: {X.shape[1]}")
+    logger.info(f"    Total samples: {len(X)}")
     
     # Create lagged features
-    print(f"    Creating lagged features (seq_len={args.seq_len})...")
+    logger.info(f"    Creating lagged features (seq_len={args.seq_len})...")
     X_with_lags, y_shifted = create_features_for_ml(X, y, args.seq_len)
-    print(f"    Extended features: {X_with_lags.shape[1]}")
+    logger.info(f"    Extended features: {X_with_lags.shape[1]}")
     
     # Split
     test_size = 0.2
     n_test = int(len(X_with_lags) * test_size)
     X_train, X_test = X_with_lags[:-n_test], X_with_lags[-n_test:]
     y_train, y_test = y_shifted[:-n_test], y_shifted[-n_test:]
-    print(f"    Train: {len(X_train)}, Test: {len(X_test)}")
+    
+    logger.log_data_info(
+        n_samples=len(X_with_lags),
+        n_features=X_with_lags.shape[1],
+        n_train=len(X_train),
+        n_test=len(X_test),
+        time_range=time_range
+    )
     
     # Train
-    print("\n[3/4] Training model...")
+    logger.log_training_start(args.model)
     
     if args.model == "gradient_boosting":
         model = GradientBoostingRegressor(
             n_estimators=args.n_estimators,
-            max_depth=6,
-            learning_rate=0.1,
+            max_depth=args.max_depth,
+            learning_rate=args.learning_rate,
             subsample=0.8,
             random_state=42,
-            verbose=1
+            verbose=0  # We handle logging ourselves
         )
     elif args.model == "random_forest":
         model = RandomForestRegressor(
             n_estimators=args.n_estimators,
-            max_depth=10,
+            max_depth=args.max_depth,
             n_jobs=-1,
             random_state=42,
-            verbose=1
+            verbose=0
         )
     else:
         model = Ridge(alpha=1.0)
     
+    # Train with timing
+    train_start = datetime.now()
     model.fit(X_train, y_train)
+    train_duration = (datetime.now() - train_start).total_seconds()
+    logger.info(f"    Training time: {train_duration:.2f} seconds")
+    
+    logger.log_training_complete()
+    logger.info("[OK] Model trained successfully")
     
     # Predict
+    logger.info("\n[4/4] Evaluating...")
     predictions = model.predict(X_test)
     
     # Inverse transform
@@ -133,18 +161,15 @@ def main():
     y_test_original = processor.inverse_transform_target(y_test)
     
     # Evaluate
-    print("\n[4/4] Evaluating...")
     metrics = evaluate_predictions(y_test_original, predictions_original)
-    print_metrics(metrics, title="Test Results")
+    logger.log_results(metrics)
     
     # Feature importance (if available)
     if hasattr(model, 'feature_importances_'):
         importance = model.feature_importances_
-        top_k = 10
-        top_indices = np.argsort(importance)[-top_k:][::-1]
-        print(f"\nTop {top_k} features:")
-        for i, idx in enumerate(top_indices):
-            print(f"  {i+1}. Feature {idx}: {importance[idx]:.4f}")
+        feature_names = [f"feature_{i}" for i in range(len(importance))]
+        importance_dict = dict(zip(feature_names, importance))
+        logger.log_feature_importance(importance_dict, top_k=10)
     
     # Save results
     output_path = Path("data/results")
@@ -153,28 +178,31 @@ def main():
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     
     # Save predictions
+    pred_file = output_path / f"predictions_{args.model}_{timestamp}.csv"
     pred_df = pd.DataFrame({
         "actual": y_test_original,
         "predicted": predictions_original,
         "error": y_test_original - predictions_original
     })
-    pred_df.to_csv(output_path / f"predictions_{args.model}_{timestamp}.csv", index=False)
-    print(f"\nPredictions saved to {output_path / f'predictions_{args.model}_{timestamp}.csv'}")
-    
-    # Save metrics
-    with open(output_path / f"metrics_{args.model}_{timestamp}.json", "w") as f:
-        json.dump(metrics, f, indent=2)
+    pred_df.to_csv(pred_file, index=False)
+    logger.log_file_saved("Predictions", str(pred_file))
     
     # Save model
     model_path = Path("models/checkpoints")
     model_path.mkdir(parents=True, exist_ok=True)
-    joblib.dump(model, model_path / f"{args.model}_model.pkl")
-    joblib.dump(processor, model_path / "processor.pkl")
-    print(f"Model saved to {model_path}")
+    model_file = model_path / f"{args.model}_model.pkl"
+    processor_file = model_path / "processor.pkl"
+    joblib.dump(model, model_file)
+    joblib.dump(processor, processor_file)
+    logger.log_file_saved("Model", str(model_file))
+    logger.log_file_saved("Processor", str(processor_file))
     
-    print("\n" + "=" * 60)
-    print("Training completed!")
-    print("=" * 60)
+    # Finalize logging
+    final_metrics = logger.finalize()
+    
+    logger.log_separator()
+    logger.info("[DONE] All completed!")
+    logger.log_separator()
 
 
 if __name__ == "__main__":
